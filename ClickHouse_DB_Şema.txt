@@ -1,0 +1,28 @@
+zuh_events"
+ts      DateTime        DEFAULT now()
+agent_name      String
+rule_id UInt32
+rule_desc       String
+severity        UInt8
+src_ip  String
+ioc_matched     UInt8   DEFAULT 0
+ioc_type        String  DEFAULT \'\'
+domain  String  DEFAULT \'\'
+md5     String  DEFAULT \'\'
+ioc_value       String  DEFAULT \'\'
+opencti_score   UInt8   DEFAULT 0
+threat_actor    String  DEFAULT \'\'
+mitre_technique String  DEFAULT \'\'
+tlp_level       String  DEFAULT \'\'
+cve     String  DEFAULT \'\'
+ai_analysis     String  DEFAULT \'\'
+ai_analyzed_at  DateTime        DEFAULT toDateTime(0)
+rule_groups     String  DEFAULT \'\'
+full_log        String  DEFAULT \'\'
+location        String  DEFAULT \'\'
+decoder String  DEFAULT \'\'
+compliance      String  DEFAULT \'\'
+agent_ip        String  DEFAULT \'\'
+fired_times     UInt32  DEFAULT 0
+event_id        String  DEFAULT \'\'
+ioc_description String  DEFAULT \'\'

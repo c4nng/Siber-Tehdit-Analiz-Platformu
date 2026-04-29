@@ -1,0 +1,18 @@
+services:
+  backend:
+    build: ./backend
+    container_name: dashboard-backend
+    restart: always
+    network_mode: host
+    environment:
+      - OLLAMA_BASE_URL=http://127.0.0.1:11434
+      - OLLAMA_MODEL=security_llama_8b-v4:latest
+
+  frontend:
+    build: ./frontend
+    container_name: dashboard-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend

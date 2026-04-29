@@ -1,0 +1,648 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import axios from 'axios'
+import {
+  Shield, Activity, AlertTriangle, Server, Cpu, HardDrive,
+  Wifi, RefreshCw, Filter, X, ChevronRight, Users, TrendingUp,
+  Radio, Brain, Tag, Clock, Eye, CheckCircle, Database, Zap,
+  FileText, Network, ThumbsUp, ThumbsDown, HelpCircle, Info
+} from 'lucide-react'
+
+const API = 'http://172.23.10.12:8090'
+const WS  = 'ws://172.23.10.12:8090/ws'
+
+function Badge({ children, color = 'gray' }) {
+  const colors = {
+    gray:   'bg-gray-700 text-gray-300 border-gray-600',
+    red:    'bg-red-900/60 text-red-300 border-red-700',
+    orange: 'bg-orange-900/60 text-orange-300 border-orange-700',
+    yellow: 'bg-yellow-900/60 text-yellow-300 border-yellow-700',
+    blue:   'bg-blue-900/60 text-blue-300 border-blue-700',
+    green:  'bg-green-900/60 text-green-300 border-green-700',
+    purple: 'bg-purple-900/60 text-purple-300 border-purple-700',
+    indigo: 'bg-indigo-900/60 text-indigo-300 border-indigo-700',
+  }
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${colors[color]}`}>
+      {children}
+    </span>
+  )
+}
+
+function SeverityBadge({ s }) {
+  if (s >= 12) return <Badge color="red"><AlertTriangle size={10}/>{s} Kritik</Badge>
+  if (s >= 8)  return <Badge color="orange"><AlertTriangle size={10}/>{s} Yüksek</Badge>
+  if (s >= 5)  return <Badge color="yellow"><Zap size={10}/>{s} Orta</Badge>
+  return <Badge color="blue"><Activity size={10}/>{s} Düşük</Badge>
+}
+
+function VerdictBadge({ verdict }) {
+  if (!verdict) return null
+  const map = {
+    malicious:      { color: 'red',    icon: <AlertTriangle size={10}/>, label: 'Zararlı' },
+    suspicious:     { color: 'orange', icon: <Zap size={10}/>,           label: 'Şüpheli' },
+    benign:         { color: 'green',  icon: <ThumbsUp size={10}/>,      label: 'Temiz' },
+    needs_more_data:{ color: 'gray',   icon: <HelpCircle size={10}/>,    label: 'Yetersiz Veri' },
+  }
+  const v = map[verdict] || { color: 'gray', icon: <Info size={10}/>, label: verdict }
+  return <Badge color={v.color}>{v.icon}{v.label}</Badge>
+}
+
+function StatCard({ title, value, icon: Icon, color, bg }) {
+  return (
+    <div className="bg-gray-800 rounded-2xl p-5 border border-gray-700">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-gray-400 text-sm font-medium">{title}</span>
+        <div className={`p-2 rounded-xl ${bg}`}><Icon size={16} className={color} /></div>
+      </div>
+      <p className={`text-3xl font-bold ${color}`}>{value ?? 0}</p>
+    </div>
+  )
+}
+
+function MetricCard({ title, value, unit, icon: Icon, color, percent }) {
+  return (
+    <div className="bg-gray-800 rounded-2xl p-5 border border-gray-700">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-gray-400 text-sm font-medium">{title}</span>
+        <div className={`p-2 rounded-xl ${color}`}><Icon size={15} className="text-white" /></div>
+      </div>
+      <p className="text-xl font-bold text-white">
+        {value}<span className="text-sm font-normal text-gray-500 ml-1">{unit}</span>
+      </p>
+      {percent !== undefined && (
+        <div className="mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${percent > 80 ? 'bg-red-500' : percent > 60 ? 'bg-orange-400' : 'bg-green-500'}`}
+            style={{ width: `${Math.min(percent, 100)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DetailRow({ label, value, mono = false }) {
+  if (!value) return null
+  return (
+    <div className="flex items-start justify-between gap-4 py-2 border-b border-gray-700/50 last:border-0">
+      <span className="text-xs text-gray-500 w-32 shrink-0 pt-0.5">{label}</span>
+      <span className={`text-sm text-right ${mono ? 'font-mono text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded' : 'text-gray-200 font-medium'}`}>
+        {value}
+      </span>
+    </div>
+  )
+}
+
+function Section({ title, icon: Icon, color = 'text-gray-500', bg = '', children }) {
+  return (
+    <div className={`px-6 py-4 border-b border-gray-700 ${bg}`}>
+      <h3 className={`text-xs font-semibold uppercase tracking-wide mb-3 flex items-center gap-1.5 ${color}`}>
+        <Icon size={11}/>{title}
+      </h3>
+      {children}
+    </div>
+  )
+}
+
+function AIAnalysisPanel({ analysis, timings, source, model }) {
+  if (!analysis) return null
+
+  const confColor = analysis.confidence >= 70 ? 'bg-red-500' : analysis.confidence >= 40 ? 'bg-orange-400' : 'bg-blue-500'
+
+  return (
+    <div className="space-y-4">
+      {/* Verdict + Confidence */}
+      <div className="bg-gray-700/50 rounded-xl p-4 border border-gray-600">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <VerdictBadge verdict={analysis.verdict} />
+            <Badge color="gray">{analysis.severity}</Badge>
+            {analysis.attack_type && <Badge color="indigo">{analysis.attack_type}</Badge>}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Güven</span>
+            <div className="w-20 h-1.5 bg-gray-600 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${confColor}`} style={{ width: `${analysis.confidence}%` }}/>
+            </div>
+            <span className="text-xs font-bold text-gray-300">{analysis.confidence}%</span>
+          </div>
+        </div>
+        <p className="text-gray-200 text-sm leading-relaxed">{analysis.summary}</p>
+      </div>
+
+      {/* Confirmed Findings */}
+      {analysis.confirmed_findings?.length > 0 && (
+        <div>
+          <p className="text-xs text-green-500 font-semibold uppercase tracking-wide mb-2 flex items-center gap-1">
+            <CheckCircle size={10}/> Tespit Edilenler
+          </p>
+          <ul className="space-y-1">
+            {analysis.confirmed_findings.map((f, i) => (
+              <li key={i} className="text-sm text-gray-300 flex items-start gap-2">
+                <span className="text-green-500 mt-0.5">·</span>{f}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Hypotheses */}
+      {analysis.hypotheses?.length > 0 && (
+        <div>
+          <p className="text-xs text-yellow-500 font-semibold uppercase tracking-wide mb-2 flex items-center gap-1">
+            <HelpCircle size={10}/> Hipotezler
+          </p>
+          <ul className="space-y-1">
+            {analysis.hypotheses.map((h, i) => (
+              <li key={i} className="text-sm text-gray-400 flex items-start gap-2">
+                <span className="text-yellow-500 mt-0.5">·</span>{h}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Recommended Actions */}
+      {analysis.recommended_actions?.length > 0 && (
+        <div>
+          <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide mb-2 flex items-center gap-1">
+            <Shield size={10}/> Önerilen Aksiyonlar
+          </p>
+          <ul className="space-y-1">
+            {analysis.recommended_actions.map((a, i) => (
+              <li key={i} className="text-sm text-gray-300 flex items-start gap-2">
+                <span className="text-blue-400 mt-0.5">→</span>{a}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Gaps */}
+      {analysis.gaps?.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide mb-2">Eksik Bilgiler</p>
+          <ul className="space-y-1">
+            {analysis.gaps.map((g, i) => (
+              <li key={i} className="text-xs text-gray-500 flex items-start gap-2">
+                <span className="mt-0.5">·</span>{g}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Input Manipulation */}
+      {analysis.input_manipulation_detected && (
+        <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 flex items-center gap-2">
+          <AlertTriangle size={14} className="text-red-400"/>
+          <span className="text-red-400 text-xs font-medium">Girdi manipülasyonu tespit edildi</span>
+        </div>
+      )}
+
+      {/* Meta */}
+      {timings && (
+        <p className="text-xs text-gray-600 text-right">
+          {source === 'cache' ? 'Önbellekten' : `${model} · ${(timings.total_duration_ns / 1e9).toFixed(1)}s · ${timings.eval_count} token`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function DetailPanel({ alert, onClose }) {
+  const [analysisData, setAnalysisData] = useState(null)
+  const [loading, setLoading]           = useState(false)
+  const [saved, setSaved]               = useState(false)
+
+  // Mevcut analiz varsa parse et
+  useEffect(() => {
+    if (alert.ai_analysis) {
+      try {
+        const parsed = JSON.parse(alert.ai_analysis)
+        setAnalysisData({ analysis: parsed, source: 'cache' })
+        setSaved(true)
+      } catch {
+        // eski string format
+        setAnalysisData({ analysis: { summary: alert.ai_analysis }, source: 'cache' })
+        setSaved(true)
+      }
+    }
+  }, [alert])
+
+  const runAnalysis = async (force = false) => {
+    setLoading(true)
+    try {
+      const r = await axios.post(`${API}/api/analyze`, {
+        event_id: alert.event_id,
+        force,
+      })
+      setAnalysisData(r.data)
+      setSaved(r.data.saved)
+    } catch (e) {
+      setAnalysisData({ error: e?.response?.data?.error || 'Ollama bağlantı hatası.' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/50" onClick={onClose} />
+      <div className="w-full max-w-2xl bg-gray-900 border-l border-gray-700 flex flex-col overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0 bg-gray-800">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-blue-900/50 rounded-xl"><Eye size={16} className="text-blue-400" /></div>
+            <div>
+              <h2 className="font-semibold text-gray-100 text-sm">Alert Detayı</h2>
+              <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                <Clock size={10}/>{alert.ts} · #{alert.event_id}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-700 rounded-xl transition">
+            <X size={16} className="text-gray-400" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+
+          {/* Temel Bilgiler */}
+          <Section title="Temel Bilgiler" icon={Shield}>
+            <DetailRow label="Alert"       value={alert.rule_desc} />
+            <DetailRow label="Rule ID"     value={`#${alert.rule_id}`} mono />
+            <div className="flex items-start justify-between gap-4 py-2 border-b border-gray-700/50">
+              <span className="text-xs text-gray-500 w-32 shrink-0 pt-0.5">Severity</span>
+              <SeverityBadge s={alert.severity} />
+            </div>
+            <DetailRow label="Fired Times" value={alert.fired_times > 0 ? `${alert.fired_times} kez` : null} />
+            <DetailRow label="Location"    value={alert.location} />
+            <DetailRow label="Decoder"     value={alert.decoder} mono />
+            {alert.rule_groups && (
+              <div className="flex items-start justify-between gap-4 py-2 border-b border-gray-700/50">
+                <span className="text-xs text-gray-500 w-32 shrink-0 pt-0.5">Gruplar</span>
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {alert.rule_groups.split(', ').map((g, i) => <Badge key={i} color="indigo">{g}</Badge>)}
+                </div>
+              </div>
+            )}
+            {alert.compliance && (
+              <div className="flex items-start justify-between gap-4 py-2 border-b border-gray-700/50">
+                <span className="text-xs text-gray-500 w-32 shrink-0 pt-0.5">Compliance</span>
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {alert.compliance.split(', ').map((c, i) => <Badge key={i} color="green">{c}</Badge>)}
+                </div>
+              </div>
+            )}
+          </Section>
+
+          {/* Agent */}
+          <Section title="Agent" icon={Server}>
+            <DetailRow label="Agent Adı" value={alert.agent_name} />
+            <DetailRow label="Agent IP"  value={alert.agent_ip} mono />
+          </Section>
+
+          {/* Network */}
+          {(alert.src_ip || alert.domain || alert.md5) && (
+            <Section title="Network / Dosya" icon={Network}>
+              <DetailRow label="Kaynak IP" value={alert.src_ip} mono />
+              <DetailRow label="Domain"    value={alert.domain} mono />
+              <DetailRow label="MD5"       value={alert.md5} mono />
+            </Section>
+          )}
+
+          {/* Full Log */}
+          {alert.full_log && (
+            <Section title="Ham Log" icon={FileText}>
+              <div className="bg-gray-950 rounded-xl p-3 text-xs font-mono text-gray-400 max-h-40 overflow-y-auto whitespace-pre-wrap border border-gray-700">
+                {alert.full_log}
+              </div>
+            </Section>
+          )}
+
+          {/* Threat Intelligence */}
+          {alert.ioc_matched === 1 && (
+            <Section title="Threat Intelligence" icon={AlertTriangle} color="text-red-400" bg="bg-red-950/20">
+              <div className="bg-red-900/20 rounded-xl p-3 mb-3 border border-red-800/50">
+                <div className="flex items-center gap-2 text-red-400 text-sm font-medium">
+                  <AlertTriangle size={14}/> IOC Eşleşmesi Tespit Edildi
+                </div>
+                {alert.ioc_description && (
+                  <p className="text-red-300 text-xs mt-1">{alert.ioc_description}</p>
+                )}
+              </div>
+              <DetailRow label="IOC Tipi"   value={alert.ioc_type} />
+              <DetailRow label="IOC Değeri" value={alert.ioc_value} mono />
+              {alert.opencti_score > 0 && (
+                <div className="flex items-center justify-between gap-4 py-2 border-b border-gray-700/50">
+                  <span className="text-xs text-gray-500 w-32 shrink-0">Risk Skoru</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-24 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${alert.opencti_score > 70 ? 'bg-red-500' : alert.opencti_score > 40 ? 'bg-orange-400' : 'bg-yellow-400'}`}
+                        style={{ width: `${alert.opencti_score}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-bold text-gray-200">{alert.opencti_score}/100</span>
+                  </div>
+                </div>
+              )}
+              <DetailRow label="Threat Actor"  value={alert.threat_actor} />
+              <DetailRow label="MITRE Tekniği" value={alert.mitre_technique} />
+              <DetailRow label="TLP"           value={alert.tlp_level} />
+              <DetailRow label="CVE"           value={alert.cve} mono />
+            </Section>
+          )}
+
+          {/* AI Analiz */}
+          <div className="px-6 py-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+                <Brain size={11}/>AI Güvenlik Analizi
+              </h3>
+              <div className="flex items-center gap-2">
+                {saved && <Badge color="green"><CheckCircle size={10}/>Kaydedildi</Badge>}
+                {analysisData && !loading && (
+                  <button
+                    onClick={() => runAnalysis(true)}
+                    className="text-xs text-gray-500 hover:text-gray-300 transition"
+                  >
+                    Yeniden analiz
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-10 gap-3">
+                <div className="animate-spin w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full" />
+                <p className="text-gray-500 text-sm">Ollama analiz yapıyor...</p>
+              </div>
+            ) : analysisData?.error ? (
+              <div className="bg-red-900/20 border border-red-700 rounded-xl p-4 text-red-400 text-sm">
+                {analysisData.error}
+              </div>
+            ) : analysisData ? (
+              <AIAnalysisPanel
+                analysis={analysisData.analysis}
+                timings={analysisData.timings}
+                source={analysisData.source}
+                model={analysisData.model}
+              />
+            ) : (
+              <div className="bg-gray-800 rounded-xl p-4 text-sm text-gray-600 italic border border-gray-700 text-center">
+                Henüz analiz yapılmadı.
+              </div>
+            )}
+
+            {!loading && !analysisData && (
+              <button
+                onClick={() => runAnalysis(false)}
+                className="mt-3 w-full flex items-center justify-center gap-2 bg-purple-700 hover:bg-purple-600 text-white text-sm px-4 py-2.5 rounded-xl transition font-medium"
+              >
+                <Brain size={15}/> AI ile Analiz Et
+              </button>
+            )}
+
+            {!loading && analysisData && !analysisData.error && (
+              <button
+                onClick={() => runAnalysis(true)}
+                className="mt-3 w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm px-4 py-2 rounded-xl transition"
+              >
+                <RefreshCw size={13}/> Yeniden Analiz Et
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AlertRow({ alert, onClick }) {
+  const aiParsed = (() => {
+    if (!alert.ai_analysis) return null
+    try { return JSON.parse(alert.ai_analysis) } catch { return null }
+  })()
+
+  return (
+    <tr
+      onClick={onClick}
+      className={`border-b border-gray-700/50 hover:bg-gray-700/30 transition cursor-pointer group ${alert.ioc_matched === 1 ? 'bg-red-950/20' : ''}`}
+    >
+      <td className="py-3 px-4 text-gray-500 text-xs font-mono whitespace-nowrap">{alert.ts}</td>
+      <td className="py-3 px-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-blue-400 text-xs font-medium">{alert.agent_name}</span>
+          {alert.agent_ip && <span className="text-gray-600 text-xs font-mono">{alert.agent_ip}</span>}
+        </div>
+      </td>
+      <td className="py-3 px-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-gray-200 text-sm truncate max-w-xs" title={alert.rule_desc}>{alert.rule_desc}</span>
+          {alert.rule_groups && <span className="text-gray-600 text-xs">{alert.rule_groups}</span>}
+        </div>
+      </td>
+      <td className="py-3 px-4"><SeverityBadge s={alert.severity} /></td>
+      <td className="py-3 px-4 text-gray-500 text-xs font-mono">{alert.src_ip || '—'}</td>
+      <td className="py-3 px-4">
+        {alert.ioc_matched === 1 ? (
+          <div className="flex flex-col gap-0.5">
+            <Badge color="red"><AlertTriangle size={9}/>{alert.ioc_type}</Badge>
+            {alert.ioc_description && (
+              <span className="text-red-500 text-xs truncate max-w-32" title={alert.ioc_description}>
+                {alert.ioc_description}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-gray-600 text-xs">—</span>
+        )}
+      </td>
+      <td className="py-3 px-4">
+        {alert.compliance
+          ? <Badge color="green">{alert.compliance.split(', ')[0]}</Badge>
+          : <span className="text-gray-600 text-xs">—</span>}
+      </td>
+      <td className="py-3 px-4">
+        {aiParsed ? (
+          <VerdictBadge verdict={aiParsed.verdict} />
+        ) : alert.ai_analysis ? (
+          <Badge color="purple"><CheckCircle size={9}/>Var</Badge>
+        ) : (
+          <span className="text-gray-600 text-xs">—</span>
+        )}
+      </td>
+      <td className="py-3 px-4">
+        <ChevronRight size={15} className="text-gray-600 group-hover:text-blue-400 transition" />
+      </td>
+    </tr>
+  )
+}
+
+export default function App() {
+  const [alerts, setAlerts]     = useState([])
+  const [stats, setStats]       = useState({})
+  const [metrics, setMetrics]   = useState({})
+  const [selected, setSelected] = useState(null)
+  const [iocOnly, setIocOnly]   = useState(false)
+  const [agentFilter, setAgent] = useState('')
+  const [wsStatus, setWsStatus] = useState('connecting')
+  const wsRef = useRef(null)
+
+  useEffect(() => {
+    const connect = () => {
+      const ws = new WebSocket(WS)
+      wsRef.current = ws
+      ws.onopen  = () => setWsStatus('live')
+      ws.onclose = () => { setWsStatus('disconnected'); setTimeout(connect, 3000) }
+      ws.onerror = () => setWsStatus('error')
+    }
+    connect()
+    return () => wsRef.current?.close()
+  }, [])
+
+  useEffect(() => {
+    const fetchMetrics = () =>
+      axios.get(`${API}/api/metrics`).then(r => {
+        const d = r.data
+        setMetrics({
+          cpu_percent:  d.cpu?.percent ?? 0,
+          mem_percent:  d.memory?.percent ?? 0,
+          disk_used:    d.disk?.used ?? 0,
+          disk_percent: d.disk?.percent ?? 0,
+          net_recv:     d.network?.bytes_recv ?? 0,
+        })
+      })
+    fetchMetrics()
+    const t = setInterval(fetchMetrics, 5000)
+    return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    const fetchStats = () => axios.get(`${API}/api/alerts/stats`).then(r => setStats(r.data))
+    fetchStats()
+    const t = setInterval(fetchStats, 10000)
+    return () => clearInterval(t)
+  }, [])
+
+  const fetchAlerts = useCallback(() => {
+    const params = { limit: 100 }
+    if (iocOnly) params.ioc_only = true
+    if (agentFilter) params.agent = agentFilter
+    axios.get(`${API}/api/alerts`, { params }).then(r => setAlerts(r.data || []))
+  }, [iocOnly, agentFilter])
+
+  useEffect(() => { fetchAlerts() }, [fetchAlerts])
+
+  const fmtBytes = (b) => {
+    if (!b) return '0 B'
+    if (b > 1e9) return (b / 1e9).toFixed(1) + ' GB'
+    if (b > 1e6) return (b / 1e6).toFixed(1) + ' MB'
+    return (b / 1e3).toFixed(1) + ' KB'
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100 flex">
+      <aside className="w-14 bg-gray-800 border-r border-gray-700 flex flex-col items-center py-5 gap-4 shrink-0">
+        <div className="p-2 bg-blue-600 rounded-xl">
+          <Shield size={17} className="text-white" />
+        </div>
+        <nav className="flex flex-col gap-2 mt-2">
+          <button className="p-2.5 bg-gray-700 rounded-xl text-blue-400"><Activity size={16}/></button>
+          <button className="p-2.5 hover:bg-gray-700 rounded-xl text-gray-500 transition"><Database size={16}/></button>
+          <button className="p-2.5 hover:bg-gray-700 rounded-xl text-gray-500 transition"><Brain size={16}/></button>
+        </nav>
+      </aside>
+
+      <main className="flex-1 p-6 overflow-auto">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-xl font-bold text-gray-100 tracking-tight">Security Dashboard</h1>
+            <p className="text-gray-500 text-xs mt-0.5">Wazuh · OpenCTI · ClickHouse · Ollama</p>
+          </div>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${
+            wsStatus === 'live'
+              ? 'bg-green-900/40 text-green-400 border-green-700'
+              : 'bg-gray-800 text-gray-500 border-gray-700'
+          }`}>
+            <Radio size={10} className={wsStatus === 'live' ? 'text-green-400' : 'text-gray-600'}/>
+            {wsStatus === 'live' ? 'Live' : 'Bağlanıyor...'}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          <StatCard title="Toplam"    value={stats.total}       icon={TrendingUp}    color="text-gray-300"   bg="bg-gray-700"/>
+          <StatCard title="IOC"       value={stats.ioc_matched} icon={AlertTriangle} color="text-red-400"    bg="bg-red-900/40"/>
+          <StatCard title="Kritik"    value={stats.critical}    icon={Zap}           color="text-orange-400" bg="bg-orange-900/40"/>
+          <StatCard title="Agentlar"  value={stats.agents}      icon={Users}         color="text-blue-400"   bg="bg-blue-900/40"/>
+          <StatCard title="AI Analiz" value={stats.ai_analyzed} icon={Brain}         color="text-purple-400" bg="bg-purple-900/40"/>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <MetricCard title="CPU"       value={metrics.cpu_percent?.toFixed(1) ?? 0}  unit="%" icon={Cpu}       color="bg-blue-600"    percent={metrics.cpu_percent}/>
+          <MetricCard title="RAM"       value={metrics.mem_percent?.toFixed(1) ?? 0}  unit="%" icon={Server}    color="bg-purple-600"  percent={metrics.mem_percent}/>
+          <MetricCard title="Disk"      value={fmtBytes(metrics.disk_used)}            unit=""  icon={HardDrive} color="bg-emerald-600" percent={metrics.disk_percent}/>
+          <MetricCard title="Network ↓" value={fmtBytes(metrics.net_recv)}             unit=""  icon={Wifi}      color="bg-orange-600"/>
+        </div>
+
+        <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-gray-700 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="font-semibold text-gray-200 text-sm">Güvenlik Alertleri</span>
+              <span className="bg-gray-700 text-gray-400 text-xs px-2 py-0.5 rounded-full">{alerts.length}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5">
+                <Filter size={11} className="text-gray-500"/>
+                <input
+                  type="text"
+                  placeholder="Agent..."
+                  className="bg-transparent text-sm text-gray-300 placeholder-gray-600 outline-none w-24"
+                  onChange={e => setAgent(e.target.value)}
+                />
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" onChange={e => setIocOnly(e.target.checked)} className="accent-red-500 w-3.5 h-3.5"/>
+                <span className="text-xs text-gray-400 whitespace-nowrap">Sadece IOC</span>
+              </label>
+              <button
+                onClick={fetchAlerts}
+                className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1.5 rounded-lg transition border border-gray-600"
+              >
+                <RefreshCw size={12}/> Yenile
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="border-b border-gray-700">
+                <tr>
+                  {['Zaman','Agent','Alert','Severity','Kaynak IP','IOC','Compliance','AI Verdict',''].map((h,i) => (
+                    <th key={i} className="py-2.5 px-4 text-left text-gray-500 text-xs font-semibold uppercase tracking-wide">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {alerts.map((a, i) => <AlertRow key={i} alert={a} onClick={() => setSelected(a)}/>)}
+              </tbody>
+            </table>
+            {alerts.length === 0 && (
+              <div className="text-center py-16">
+                <Shield size={32} className="text-gray-700 mx-auto mb-3"/>
+                <p className="text-gray-600 text-sm">Gösterilecek alert yok</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {selected && (
+        <DetailPanel alert={selected} onClose={() => { setSelected(null); fetchAlerts() }}/>
+      )}
+    </div>
+  )
+}
