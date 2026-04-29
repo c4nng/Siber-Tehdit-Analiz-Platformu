@@ -1,1 +1,4 @@
 .env
+
+# Local migration backups
+dashboard/docker-compose.yml.pre-ollama-docker.*.bak

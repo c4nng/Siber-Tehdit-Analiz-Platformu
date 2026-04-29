@@ -7,6 +7,9 @@ services:
     environment:
       - OLLAMA_BASE_URL=http://127.0.0.1:11434
       - OLLAMA_MODEL=security_llama_8b-v4:latest
+      - OLLAMA_TIMEOUT_SECONDS=120
+    depends_on:
+      - ollama
 
   frontend:
     build: ./frontend
@@ -16,3 +19,36 @@ services:
       - "3000:80"
     depends_on:
       - backend
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: dashboard-ollama
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: dashboard-ollama-init
+    restart: "no"
+    depends_on:
+      - ollama
+    volumes:
+      - ./ollama:/ollama:ro
+    entrypoint: >
+      sh -c "
+      echo '[1/4] Waiting for Ollama API...';
+      until OLLAMA_HOST=http://ollama:11434 ollama list >/dev/null 2>&1; do sleep 3; done;
+      echo '[2/4] Pulling base model llama3.1:8b...';
+      OLLAMA_HOST=http://ollama:11434 ollama pull llama3.1:8b;
+      echo '[3/4] Creating custom model security_llama_8b-v4:latest...';
+      OLLAMA_HOST=http://ollama:11434 ollama create security_llama_8b-v4:latest -f /ollama/Modelfile;
+      echo '[4/4] Model ready.';
+      "
+
+volumes:
+  ollama_data:
